@@ -53,19 +53,33 @@ def divide_into_chunks(output_path: str):
     return chunks
 
 # create vector db
-def vector_db(chunks):
-    vector_db = Chroma.from_texts(
-        texts=chunks,
-        embedding=OllamaEmbeddings(model="nomic-embed-text"),
-        collection_name="local-rag"
-    )
-    print("Banco de dados vetorial criado com sucesso")
+def vector_db(chunks, persist_dir="./chroma_db", collection_name="local-rag"):
+    embedding = OllamaEmbeddings(model="nomic-embed-text")
+    
+    if os.path.exists(persist_dir):
+        print(f"Carregando banco de dados vetorial existente de {persist_dir}")
+        vector_db = Chroma(
+            collection_name=collection_name,
+            embedding_function=embedding,
+            persist_directory=persist_dir
+        )
+    else:
+        print(f"Criando novo banco de dados vetorial em {persist_dir}")
+        vector_db = Chroma.from_texts(
+            texts=chunks,
+            embedding=embedding,
+            collection_name=collection_name,
+            persist_directory=persist_dir
+        )
+        vector_db.persist()
+        print(f"Banco de dados vetorial criado e salvo em {persist_dir}")
+    
     return vector_db
 
-def retriever(vector_db):
+def get_retriever(vector_db):
     retriever = vector_db.as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": 3}
+        search_type="mmr",
+        search_kwargs={"k": 3, "fetch_k": 5}
     )
     return retriever
 
@@ -94,9 +108,11 @@ def generate_structured_summary(vector_db):
         print(f"Tempo para buscar chunks ({section}): {time() - start:.2f}s")
 
         # generate summ
+        start = time()
         prompt_template = PromptTemplate(input_variables=["context"], template=template)
         prompt = prompt_template.format(context=context)
         summary[section] = llm(prompt)
+        print(f"Tempo para LLM ({section}): {time() - start:.2f}s")
 
     
     formatted_summary = "\n=== Resumo Estruturado do Artigo ===\n"
@@ -104,7 +120,6 @@ def generate_structured_summary(vector_db):
         formatted_summary += f"\n**{section}**\n{content.strip()}\n"
 
     return formatted_summary
-
 
 def interact_with_pdf(retriever, question: str):
     llm = Ollama(model="llama3")
@@ -119,7 +134,7 @@ def interact_with_pdf(retriever, question: str):
     answer = llm(prompt)
     return answer
 
-def main(pdf_path, output_path):
+def main(pdf_path, output_path, dir_db):
     pdf_docs = load_pdf(pdf_path)
     if not pdf_docs:
         return
@@ -131,14 +146,12 @@ def main(pdf_path, output_path):
     print(f"Divisão em chunks:{time() - start}")
 
     start = time()
-    db = vector_db(chunks)
+    db = vector_db(chunks, dir_db)
     print(f"Criação do banco de dados vetorial:{time() - start}")
 
-    start = time()
-    rag_retriever = retriever(db)
-
+    rag_retriever = get_retriever(db)
     print("\nGerando resumo estruturado...")
-    summary = generate_structured_summary(db)
+    summary = generate_structured_summary(rag_retriever)
     print(summary)
 
     while True:
@@ -151,4 +164,5 @@ def main(pdf_path, output_path):
 if __name__ == "__main__":
     pdf_path = "/home/mateus/Downloads/Artigos/Data Labeling for Machine Learning Engineers.pdf"
     output_path = "/home/mateus/Downloads/Artigos/texto_extraido.txt"
-    main(pdf_path, output_path)
+    dir_db = "./chroma_db"
+    main(pdf_path, output_path, dir_db)
