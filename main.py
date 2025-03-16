@@ -1,6 +1,7 @@
 import re
 import os
 import fitz  # PyMuPDF
+import json
 from langchain_unstructured import UnstructuredLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
@@ -31,6 +32,24 @@ def render_pages(file_path, doc_list: list, output_txt="output.txt") -> str:
                 f.write(content + "\n\n")
             print(f"Texto da página {page_number + 1} salvo em {output_txt}")
     return output_txt
+
+def generate_markdown(dicionario, nome_arquivo="artigo.md"):
+    emojis = {
+    "Introduction": "📝",  
+    "Relevance": "💡", 
+    "Context": "🌍",      
+    "Results": "📊",      
+    "Conclusion": "✅"    
+    }
+    with open(nome_arquivo, "w", encoding="utf-8") as arquivo:
+        arquivo.write("# Artigo\n\n")
+        
+        for secao, resumo in dicionario.items():
+            emoji = emojis.get(secao, "📌") 
+            arquivo.write(f"## {emoji} {secao}\n\n")
+            arquivo.write(f"{resumo}\n\n")
+
+    print(f"Arquivo '{nome_arquivo}' gerado com sucesso!")
 
 def load_pdf(pdf_path: str):
     if pdf_path and os.path.exists(pdf_path):
@@ -83,24 +102,27 @@ def get_retriever(vector_db):
     )
     return retriever
 
-def generate_structured_summary(vector_db):
+def save_json(summary):
+    with open("./summ.json", "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=4, ensure_ascii=False)
+    print(f"Dicionário salvo em ./summ.json")
+
+def generate_structured_summary(retriever):
     llm = Ollama(model="llama3")
     
     section_prompts = {
-        "Introdução": "Analise o contexto fornecido e resuma a introdução do artigo, destacando o objetivo principal da pesquisa, a motivação por trás do estudo e as questões ou hipóteses que orientam o trabalho. Inclua também uma breve menção à abordagem metodológica, se relevante, e ao contexto geral em que a pesquisa se insere:\n\n{context}",
-        "Contexto": "Com base no contexto fornecido, descreva detalhadamente o problema ou cenário abordado pelo artigo. Inclua informações sobre o contexto teórico, prático ou social que justifica a pesquisa, os desafios existentes e por que esse problema é relevante para a área de estudo. Destaque também eventuais lacunas no conhecimento que o artigo busca preencher:\n\n{context}",
-        "Resultados": "Extraia e resuma os principais resultados do artigo, destacando dados quantitativos ou qualitativos relevantes. Organize as descobertas de forma clara, mencionando tendências, padrões ou insights significativos. Se aplicável, inclua comparações com estudos anteriores ou metas estabelecidas na pesquisa:\n\n{context}",
-        "Conclusão": "Resuma as conclusões do artigo de forma concisa, focando nas implicações práticas, teóricas ou sociais dos resultados. Destaque as principais mensagens finais, contribuições para a área de estudo e possíveis direções para pesquisas futuras. Se relevante, mencione limitações do estudo e como elas podem ser superadas:\n\n{context}",
-        "Relevância": "Discuta a relevância do artigo de forma abrangente, considerando seu impacto teórico, prático e social. Explique como os resultados ou conclusões contribuem para o avanço da área de estudo, se abordam lacunas existentes e quais são as possíveis aplicações ou implicações dos achados. Além disso, avalie a importância do artigo para diferentes públicos, como acadêmicos, profissionais ou a sociedade em geral:\n\n{context}"
+        "Introduction": "Analyze the provided context and summarize the introduction of the article, highlighting the main objective of the research, the motivation behind the study, and the questions or hypotheses guiding the work. Also include a brief mention of the methodological approach, if relevant, and the general context in which the research is situated:\n\n{context}\n In English",
+        "Context": "Based on the provided context, describe in detail the problem or scenario addressed by the article. Include information about the theoretical, practical, or social context that justifies the research, the existing challenges, and why this problem is relevant. Also highlight any gaps in knowledge that the article seeks to fill:\n\n{context}\n In English",
+        "Results": "Extract and summarize the main results of the article, highlighting relevant quantitative or qualitative data. Organize the findings clearly, mentioning trends, patterns, or significant insights. If applicable, include comparisons with previous studies or goals established in the research:\n\n{context}\n In English",
+        "Conclusion": "Summarize the conclusions of the article concisely, focusing on the practical, theoretical, or social implications of the results. Highlight the key final messages, contributions to the field of study, and possible directions for future research. If relevant, mention limitations of the study:\n\n{context}\n In English",
+        "Relevance": "Discuss the relevance of the article, considering its theoretical and practical impact. Explain how the results or conclusions contribute to the advancement of the field, whether they address existing gaps, and what the potential applications or implications of the findings are:\n\n{context}\n In English"
     }
-    
-    retriever = vector_db.as_retriever(search_type="similarity", search_kwargs={"k": 3})
     
     summary = {}
     for section, template in section_prompts.items():
         start = time()
         
-        query = f"Encontre partes do artigo que contenham informações sobre {section.lower()}."
+        query = f"Find parts of the article that contain information about {section.lower()}."
         # get more relevantes sections to the query
         docs = retriever.get_relevant_documents(query)
         context = "\n".join(doc.page_content for doc in docs)
@@ -114,12 +136,10 @@ def generate_structured_summary(vector_db):
         summary[section] = llm(prompt)
         print(f"Tempo para LLM ({section}): {time() - start:.2f}s")
 
-    
-    formatted_summary = "\n=== Resumo Estruturado do Artigo ===\n"
-    for section, content in summary.items():
-        formatted_summary += f"\n**{section}**\n{content.strip()}\n"
+    save_json(summary)
+    generate_markdown(summary)
 
-    return formatted_summary
+    return summary
 
 def interact_with_pdf(retriever, question: str):
     llm = Ollama(model="llama3")
