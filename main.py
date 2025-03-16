@@ -9,6 +9,7 @@ from langchain_community.embeddings import OllamaEmbeddings
 from langchain.prompts import PromptTemplate
 from langchain_community.llms import Ollama
 from time import time
+import argparse
 
 # join words separated by -
 def join_word(text):
@@ -182,7 +183,14 @@ def main(pdf_path, output_path, dir_db):
         print(f"\nResposta: {answer}")
 
 if __name__ == "__main__":
-    pdf_path = "/home/mateus/Downloads/Artigos/Data Labeling for Machine Learning Engineers.pdf"
-    output_path = "/home/mateus/Downloads/Artigos/texto_extraido.txt"
-    dir_db = "./chroma_db"
-    main(pdf_path, output_path, dir_db)
+    parser = argparse.ArgumentParser(description="Extract text from a PDF and save it to ChromaDB.")
+
+    parser.add_argument("-pdf", "--pdf_file", type=str, required=True, help="Path to the input PDF file.")
+    parser.add_argument("-o", "--output_file", type=str, default=os.path.join(os.getcwd(), "summa.txt"),
+                         help="Path to save the extracted text.")
+    parser.add_argument("-db", "--database_dir", type=str, default=os.path.join(os.getcwd(), "chroma_db"), 
+                        help="Directory where ChromaDB will be stored (default: ./chroma_db).")
+
+    args = parser.parse_args()
+    
+    main(args.pdf_file, args.output_file, args.database_dir)
