@@ -34,7 +34,7 @@ def render_pages(file_path, doc_list: list, output_txt="output.txt") -> str:
             print(f"Texto da página {page_number + 1} salvo em {output_txt}")
     return output_txt
 
-def generate_markdown(dicionario, nome_arquivo="artigo.md"):
+def generate_markdown(dicionario):
     emojis = {
     "Introduction": "📝",  
     "Relevance": "💡", 
@@ -42,7 +42,8 @@ def generate_markdown(dicionario, nome_arquivo="artigo.md"):
     "Results": "📊",      
     "Conclusion": "✅"    
     }
-    with open(nome_arquivo, "w", encoding="utf-8") as arquivo:
+    path_summ = os.path.join(os.getcwd(), "summ.md")
+    with open(path_summ, "w", encoding="utf-8") as arquivo:
         arquivo.write("# Artigo\n\n")
         
         for secao, resumo in dicionario.items():
@@ -50,16 +51,16 @@ def generate_markdown(dicionario, nome_arquivo="artigo.md"):
             arquivo.write(f"## {emoji} {secao}\n\n")
             arquivo.write(f"{resumo}\n\n")
 
-    print(f"Arquivo '{nome_arquivo}' gerado com sucesso!")
+    print(f"Summary saved: '{path_summ}'")
 
 def load_pdf(pdf_path: str):
     if pdf_path and os.path.exists(pdf_path):
         loader = UnstructuredLoader(file_path=pdf_path)
         pdf = loader.load()
-        print(f"PDF carregado com sucesso: {pdf_path}")
+        print(f"PDF loaded in: {pdf_path}")
         return pdf
     else:
-        print("Caminho inválido!")
+        print("Invalid path")
         return None
 
 # divide text into chunks
@@ -69,22 +70,22 @@ def divide_into_chunks(output_path: str):
     
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = text_splitter.split_text(txt)
-    print(f"Texto dividido em {len(chunks)} chunks")
+    print(f"Text splitted in {len(chunks)} chunks")
     return chunks
 
 # create vector db
-def vector_db(chunks, persist_dir="./chroma_db", collection_name="local-rag"):
+def vector_db(chunks, persist_dir, collection_name="local-rag"):
     embedding = OllamaEmbeddings(model="nomic-embed-text")
     
     if os.path.exists(persist_dir):
-        print(f"Carregando banco de dados vetorial existente de {persist_dir}")
+        print(f"Loading db in {persist_dir}")
         vector_db = Chroma(
             collection_name=collection_name,
             embedding_function=embedding,
             persist_directory=persist_dir
         )
     else:
-        print(f"Criando novo banco de dados vetorial em {persist_dir}")
+        print(f"Creating new db in {persist_dir}")
         vector_db = Chroma.from_texts(
             texts=chunks,
             embedding=embedding,
@@ -92,7 +93,7 @@ def vector_db(chunks, persist_dir="./chroma_db", collection_name="local-rag"):
             persist_directory=persist_dir
         )
         vector_db.persist()
-        print(f"Banco de dados vetorial criado e salvo em {persist_dir}")
+        print(f"Created db in {persist_dir}")
     
     return vector_db
 
@@ -104,9 +105,10 @@ def get_retriever(vector_db):
     return retriever
 
 def save_json(summary):
-    with open("./summ.json", "w", encoding="utf-8") as f:
+    path_summ = os.path.join(os.getcwd(), "summ.json")
+    with open(path_summ, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=4, ensure_ascii=False)
-    print(f"Dicionário salvo em ./summ.json")
+    print(f"Saved dict in: {path_summ}")
 
 def generate_structured_summary(retriever):
     llm = Ollama(model="llama3")
@@ -149,7 +151,7 @@ def interact_with_pdf(retriever, question: str):
     
     prompt_template = PromptTemplate(
         input_variables=["context", "question"],
-        template="Com base no seguinte contexto:\n{context}\n\nResponda à pergunta: {question}"
+        template="Based on the following context:\n{context}\n\nAnswer the question: {question}"
     )
     prompt = prompt_template.format(context=context, question=question)
     answer = llm(prompt)
@@ -171,7 +173,7 @@ def main(pdf_path, output_path, dir_db):
     print(f"Criação do banco de dados vetorial:{time() - start}")
 
     rag_retriever = get_retriever(db)
-    print("\nGerando resumo estruturado...")
+    print("\nCreating summary...")
     summary = generate_structured_summary(rag_retriever)
     print(summary)
 
