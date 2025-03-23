@@ -4,12 +4,20 @@ import fitz  # PyMuPDF
 import json
 from langchain_unstructured import UnstructuredLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain_chroma import Chroma
+from langchain_ollama import OllamaEmbeddings
 from langchain.prompts import PromptTemplate
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaLLM
 from time import time
 import argparse
+import logging
+
+# Define o nível de log global para WARNING
+logging.getLogger().setLevel(logging.WARNING)
+logging.getLogger("chroma").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("requests").setLevel(logging.WARNING)
+# Desative os logs do Ollama
 
 # join words separated by -
 def join_word(text):
@@ -27,11 +35,10 @@ def render_pages(file_path, doc_list: list, output_txt="output.txt") -> str:
             page_docs = [
                 doc for doc in doc_list if doc.metadata.get("page_number") == page_number
             ]
-            f.write(f"\n=== Página {page_number + 1} ===\n\n")
             for doc in page_docs:
                 content = pipeline_process(doc.page_content)
                 f.write(content + "\n\n")
-            print(f"Texto da página {page_number + 1} salvo em {output_txt}")
+            print(f"Extracted page {page_number + 1}")
     return output_txt
 
 def generate_markdown(dicionario):
@@ -57,7 +64,7 @@ def load_pdf(pdf_path: str):
     if pdf_path and os.path.exists(pdf_path):
         loader = UnstructuredLoader(file_path=pdf_path)
         pdf = loader.load()
-        print(f"PDF loaded in: {pdf_path}")
+        print(f"PDF loaded:{pdf_path}")
         return pdf
     else:
         print("Invalid path")
@@ -70,7 +77,7 @@ def divide_into_chunks(output_path: str):
     
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = text_splitter.split_text(txt)
-    print(f"Text splitted in {len(chunks)} chunks")
+    print(f"\nText splitted in {len(chunks)} chunks\n")
     return chunks
 
 # create vector db
@@ -82,7 +89,7 @@ def vector_db(chunks, persist_dir, collection_name="local-rag"):
         vector_db = Chroma(
             collection_name=collection_name,
             embedding_function=embedding,
-            persist_directory=persist_dir
+            persist_directory=persist_dir,
         )
     else:
         print(f"Creating new db in {persist_dir}")
@@ -92,7 +99,6 @@ def vector_db(chunks, persist_dir, collection_name="local-rag"):
             collection_name=collection_name,
             persist_directory=persist_dir
         )
-        vector_db.persist()
         print(f"Created db in {persist_dir}")
     
     return vector_db
@@ -111,7 +117,7 @@ def save_json(summary):
     print(f"Saved dict in: {path_summ}")
 
 def generate_structured_summary(retriever):
-    llm = Ollama(model="llama3")
+    llm = OllamaLLM(model="llama3")
     
     section_prompts = {
         "Introduction": "Analyze the provided context and summarize the introduction of the article, highlighting the main objective of the research, the motivation behind the study, and the questions or hypotheses guiding the work. Also include a brief mention of the methodological approach, if relevant, and the general context in which the research is situated:\n\n{context}\n In English",
@@ -122,31 +128,31 @@ def generate_structured_summary(retriever):
     }
     
     summary = {}
+    
     for section, template in section_prompts.items():
         start = time()
-        
+
         query = f"Find parts of the article that contain information about {section.lower()}."
-        # get more relevantes sections to the query
-        docs = retriever.get_relevant_documents(query)
+        docs = retriever.invoke(query)
         context = "\n".join(doc.page_content for doc in docs)
 
-        print(f"Tempo para buscar chunks ({section}): {time() - start:.2f}s")
+        #print(f"Tempo para buscar chunks ({section}): {time() - start:.2f}s")
 
-        # generate summ
         start = time()
         prompt_template = PromptTemplate(input_variables=["context"], template=template)
         prompt = prompt_template.format(context=context)
-        summary[section] = llm(prompt)
-        print(f"Tempo para LLM ({section}): {time() - start:.2f}s")
+        summary[section] = llm.invoke(prompt)
+        print(f"\n✅ Summary for '{section}' completed!")
+        #print(f"\nTempo para LLM ({section}): {time() - start:.2f}s")
 
-    save_json(summary)
+    save_json(summary)  
     generate_markdown(summary)
 
     return summary
 
 def interact_with_pdf(retriever, question: str):
-    llm = Ollama(model="llama3")
-    docs = retriever.get_relevant_documents(question)
+    llm = OllamaLLM(model="llama3")
+    docs = retriever.invoke(question)
     context = "\n".join([doc.page_content for doc in docs])
     
     prompt_template = PromptTemplate(
@@ -154,7 +160,7 @@ def interact_with_pdf(retriever, question: str):
         template="Based on the following context:\n{context}\n\nAnswer the question: {question}"
     )
     prompt = prompt_template.format(context=context, question=question)
-    answer = llm(prompt)
+    answer = llm.invoke(prompt)
     return answer
 
 def main(pdf_path, output_path, dir_db):
@@ -166,20 +172,20 @@ def main(pdf_path, output_path, dir_db):
 
     start = time()
     chunks = divide_into_chunks(output_path)
-    print(f"Divisão em chunks:{time() - start}")
+    #print(f"Divisão em chunks:{time() - start}")
 
     start = time()
     db = vector_db(chunks, dir_db)
-    print(f"Criação do banco de dados vetorial:{time() - start}")
+    #print(f"Criação do banco de dados vetorial:{time() - start}")
 
     rag_retriever = get_retriever(db)
     print("\nCreating summary...")
     summary = generate_structured_summary(rag_retriever)
-    print(summary)
+    #print(summary)
 
     while True:
-        question = input("\nFaça uma pergunta sobre o PDF (ou 'sair' para encerrar): ")
-        if question.lower() == "sair":
+        question = input("\nAsk a question about the PDF (or type 'exit' to quit):")
+        if question.lower() == "quit":
             break
         answer = interact_with_pdf(rag_retriever, question)
         print(f"\nResposta: {answer}")
